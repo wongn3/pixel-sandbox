@@ -42,6 +42,7 @@ redo_stack = []
 
 show_help = False
 show_reset_confirm = False
+show_instructions = True
 
 buttons = {
      "undo": pygame.Rect(0, 0, 120, 45),
@@ -128,6 +129,20 @@ def draw_ui():
      draw_text("Sand", 30, 50)
      draw_text("Grass", 105, 50)
 
+     if show_instructions:
+          instruction_lines = [
+               "Select a material above and click anywhere to place it!",
+               "Create and observe material interactions!",
+               "Experiment freely, undo anytime!"
+          ]
+          start_y = 250
+          spacing = 50
+
+          for i, line in enumerate(instruction_lines):
+               text_surface = small_font.render(line, True, (255, 255, 255))
+               y = start_y + i * spacing
+               screen.blit(text_surface, text_surface.get_rect(center=(SCREEN_WIDTH // 2, y)))
+
      # material boxes
      pygame.draw.rect(screen, MATERIALS[SAND], buttons["sand"])
      pygame.draw.rect(screen, MATERIALS[GRASS], buttons["grass"])
@@ -151,9 +166,9 @@ def draw_grid():
                material = grid[y][x]
                if material != EMPTY:
                     pygame.draw.rect(
-                    screen,
-                    MATERIALS[material],
-                    (x * CELL_SIZE, CANVAS_Y + y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+                         screen,
+                         MATERIALS[material],
+                         (x * CELL_SIZE, CANVAS_Y + y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
                     )
 
 
@@ -211,6 +226,8 @@ while running:
                     brush_size += 1
 
           if event.type == pygame.MOUSEBUTTONDOWN:
+               show_instructions = False
+
                if buttons["undo"].collidepoint(mx, my): undo()
                elif buttons["redo"].collidepoint(mx, my):
                     redo()
