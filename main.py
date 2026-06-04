@@ -6,6 +6,8 @@ from copy import deepcopy
 
 # setup
 pygame.init()
+
+# allows holding hotkeys down as continuous input
 pygame.key.set_repeat(300, 150)
 
 SCREEN_WIDTH, SCREEN_HEIGHT = 1600, 1200
@@ -23,6 +25,7 @@ GRID_HEIGHT = (SCREEN_HEIGHT - 120) // CELL_SIZE
 CANVAS_Y = 120
 
 # how large the reaction radius is in proportion to brush size
+# 1.0 = 100% brush size, 0.5 = 50% brush size, etc
 REACTION_RADIUS_SCALE = 1
 
 EMPTY = 0
@@ -41,6 +44,9 @@ MATERIALS = {                                # ------ TODO ADD MATERIALS HERE --
      MUD: (100, 70, 40),
 }
 
+# main stores materials as ints
+# this is to translate that into strings
+# for all the ms
 MATERIAL_ID_TO_NAME = {
      EMPTY: 'empty',
      SAND: 'sand',
@@ -50,6 +56,7 @@ MATERIAL_ID_TO_NAME = {
      MUD: 'mud',
 }
 
+# converts back to ints
 MATERIAL_NAME_TO_ID = {
      'sand': SAND,
      'grass': GRASS,
@@ -65,6 +72,9 @@ selected_material = EMPTY
 brush_size = 10
 volume = 70
 muted = False
+
+# shared request counter for all file-based ms calls
+# makes repeated identical requests look different to services
 request_id = 0
 
 undo_stack = []
@@ -74,8 +84,10 @@ reaction_cache = {}
 show_help = False
 show_reset_confirm = False
 show_instructions = True
+
 show_material_info = False
 material_info_lines = []
+current_info_material = None
 
 buttons = {
      'undo': pygame.Rect(0, 0, 120, 45),
@@ -90,6 +102,11 @@ buttons = {
 
 #####   MICROSERVICE COMMUNICATION   #####
 
+# writes a key=value request file for a ms
+# every request automatically gets a unique request_id
+# example output:
+# request_id=3
+# material=sand
 def send_request(request_file, data):
      global request_id
      request_id += 1
@@ -101,6 +118,8 @@ def send_request(request_file, data):
                file.write(f'{key}={value}\n')
 
 
+# reads a key=value response file from a ms and returns it as a dict
+# lines without '=' are ignored so malformed/blank lines dont make it crash
 def read_response(response_file: str):
      data = {}
 
@@ -110,12 +129,15 @@ def read_response(response_file: str):
                     line = line.strip()
                     if '=' not in line: continue
 
-                    key, value = line.split('=')
+                    key, value = line.split('=', 1)
                     data[key] = value
      except FileNotFoundError: return None
      return data
 
 
+# sends current volume and brush size to the validation ms
+# the service clamps invalid values and returns new_volume/new_brush_size
+# a short wait is needed because the ms checks the text file every .1 seconds
 def validate_settings():
      global volume, brush_size
 
@@ -136,16 +158,21 @@ def validate_settings():
           brush_size = int(response['new_brush_size'])
 
 
+# requests info about 1 material from the material info ms
+# later used to build the right-click material info popup
 def get_material_info(material_name):
      send_request('material_info_request.txt', {
           'material': material_name
      })
 
-     # material info checks every .1 seconds
+     # tiny delay (20ms) so the ms has time to respond 
      pygame.time.wait(120)
      return read_response('material_info_response.txt')
 
 
+# handles right-clicking material buttons
+# if the same material popup is already open, close it
+# if a different material is clicked, update popup with the new materials info
 def show_info_for_material(material_name):
      global show_material_info, material_info_lines, current_info_material
 
@@ -179,6 +206,8 @@ def show_info_for_material(material_name):
      show_material_info = True
 
 
+# sends 2 material names to the reaction rule ms
+# returns the material id of the reaction result, or None if there is no reaction/error
 def get_reaction_material(existing_material, new_material):
      existing_name = MATERIAL_ID_TO_NAME.get(existing_material)
      new_name = MATERIAL_ID_TO_NAME.get(new_material)
@@ -204,6 +233,7 @@ def get_reaction_material(existing_material, new_material):
      return MATERIAL_NAME_TO_ID.get(reaction_name)
 
 
+# caches reaction results so repeated material collisions dont call the ms every frame
 # prevents a LOT of lag by virtue of not calling the service 60x/sec
 def get_cached_reaction(existing_material, new_material):
      pair = frozenset([existing_material, new_material])
@@ -259,7 +289,6 @@ def apply_brush(mx, my, material):                     # ------ TODO FUTURE PHYS
      # prevents out of bounds
      if not (0 <= gx < GRID_WIDTH and 0 <= gy < GRID_HEIGHT): return
 
-     # reaction check only happens on the center cursor cell
      existing_material = grid[gy][gx]
      reaction_material = None
      reaction_radius = max(1, int(brush_size * REACTION_RADIUS_SCALE))
@@ -427,7 +456,12 @@ while running:
      for event in pygame.event.get():
           if event.type == pygame.QUIT: running = False
 
-          # HOTKEYS
+          # HOTKEYS:
+          # [ decreases brush size
+          # ] increases brush size
+          # up increases volume
+          # down decreases volume
+          # values are sent to the validation ms for bounds
           if event.type == pygame.KEYDOWN:
                if event.key == pygame.K_LEFTBRACKET:
                     brush_size -= 1
@@ -450,6 +484,8 @@ while running:
                elif buttons['reset'].collidepoint(mx, my): show_reset_confirm = True
                elif buttons['help'].collidepoint(mx, my): show_help = not show_help
 
+               # left-click material buttons selects the corresponding material
+               # right-click material buttons request info from the material info ms
                elif buttons['sand'].collidepoint(mx, my):
                     if event.button == 1:                        # event.button == 1 is left click
                          selected_material = SAND
